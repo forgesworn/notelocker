@@ -56,6 +56,10 @@ const PACE_GAP_MS = 6
 // before the next command lands on its input buffer.
 const FLUSH_SETTLE_MS = 150
 
+// How many times the framed probe is tried before the line probe - the
+// unrecoverable one - gets a turn. See detectTransport.
+const FRAME_PROBE_ATTEMPTS = 2
+
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
 
 // Both devices accept a `tag` on any command and echo it verbatim on whatever
@@ -263,15 +267,32 @@ function parseJson(text: string): Response {
  */
 export async function detectTransport(wire: Wire, probeMs = 1_500): Promise<Transport> {
   const frame = frameTransport(wire)
-  try {
-    await frame.request({cmd: 'get_info'}, probeMs)
-    return frame
-  } catch (err) {
-    // A NACK means we found the device and it declined. Falling through would
-    // replace its own explanation with "nothing answered", which sends you
-    // hunting for a cable fault when the device already told you the reason.
-    if (err instanceof DeviceRefusedError) throw err
-    if (!(err instanceof TransportError)) throw err
+  // Twice, before the line probe gets a turn. Measured on hardware
+  // 2026-09-06: a heartwood that has just been unlocked spends a while
+  // finishing its boot, and one probe of 1.5 s times out against a device that
+  // is merely busy. That timeout is not the expensive part - the LINE probe
+  // behind it is, because a heartwood that receives newline-delimited JSON
+  // stops answering framed commands for the rest of the session. So a device
+  // that only needed another second answers "no note locker answered on either
+  // framing" and stays wedged until the port is reopened, which is exactly
+  // what happened on the bench and exactly the wrong story to tell.
+  //
+  // The frame probe is the safe one to repeat: a vault ignores a frame and
+  // resynchronises on the next newline, and a heartwood answers it. So it gets
+  // its second chance before anything unrecoverable is sent.
+  for (let attempt = 0; attempt < FRAME_PROBE_ATTEMPTS; attempt += 1) {
+    try {
+      await frame.request({cmd: 'get_info'}, probeMs)
+      return frame
+    } catch (err) {
+      // A NACK means we found the device and it declined. Falling through
+      // would replace its own explanation with "nothing answered", which sends
+      // you hunting for a cable fault when the device already told you the
+      // reason. Retrying would be just as wrong: it declined, it will decline
+      // again.
+      if (err instanceof DeviceRefusedError) throw err
+      if (!(err instanceof TransportError)) throw err
+    }
   }
 
   // Terminate the line the frame probe left dangling in a vault's buffer, and

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest'
-import {FrameDecoder, NOTE_CMD} from '../src/frame.ts'
+import {FrameDecoder, NOTE_CMD, NOTE_RESP, encodeFrame} from '../src/frame.ts'
 import {DeviceRefusedError, TimeoutError, TransportError, detectTransport, frameTransport, lineTransport} from '../src/transport.ts'
 import {FakeWire, frameDevice, lineDevice} from './wire.ts'
 
@@ -115,6 +115,39 @@ describe('detectTransport', () => {
     const [flushed, probe] = [written.lastIndexOf('\n{'), written.slice(written.lastIndexOf('\n{') + 1)]
     expect(flushed).toBeGreaterThan(0)
     expect(JSON.parse(probe)).toMatchObject({cmd: 'get_info'})
+  })
+
+  it('gives the framed probe a second go before risking the line probe', async () => {
+    // Measured on hardware 2026-09-06: a heartwood that has just been
+    // unlocked is still booting, and one 1.5 s probe times out against a
+    // device that is merely busy. The timeout is cheap; the line probe behind
+    // it is not, because it wedges a heartwood for the whole session. So the
+    // safe probe gets its second chance first.
+    let seen = 0
+    const wire = new FakeWire()
+    const encode = new TextEncoder()
+    wire.onWrite = bytes => {
+      // Ignore the first framed probe entirely, as a booting board does.
+      if (bytes[0] === 0x48 /* H */ && ++seen === 1) return
+      const frames = new FrameDecoder().push(bytes)
+      for (const f of frames) {
+        if (f.type !== NOTE_CMD) continue
+        const command = JSON.parse(decoder.decode(f.payload))
+        const answer = {ok: true, fw_version: '0.0.9', tag: command.tag}
+        wire.deliver(encodeFrame(NOTE_RESP, encode.encode(JSON.stringify(answer))))
+      }
+    }
+
+    const transport = await detectTransport(wire, 100)
+
+    expect(transport.kind).toBe('frame')
+    // Two framed probes went out...
+    const probes = new FrameDecoder().push(wire.writtenBytes)
+    expect(probes).toHaveLength(2)
+    expect(probes.every(f => f.type === NOTE_CMD)).toBe(true)
+    // ...and the line path was never entered. Its first act is the lone flush
+    // newline, so a one-byte write of 0x0a is the tell.
+    expect(wire.written.some(chunk => chunk.length === 1 && chunk[0] === 0x0a)).toBe(false)
   })
 
   it('does not wedge a heartwood by probing the wrong framing first', async () => {

@@ -48,14 +48,21 @@ framing around each message:
 | note command | `{"cmd":...}\n` | frame type `0x70`, reply `0x71` |
 
 `--transport auto` (the default) works out which by asking for `get_info` each
-way. It probes the **framed** protocol first, and the order is not a
-preference. Measured on hardware 2026-08-27: a heartwood that receives
+way. It probes the **framed** protocol twice, then the newline one, and the
+order is not a preference. Measured on hardware 2026-08-27: a heartwood that receives
 newline-delimited JSON stops answering framed commands for the rest of the
 session, and only reopening the port recovers it, while a vault that receives a
 frame is poisoned only until the next newline, because it reads to one and
 resynchronises. So the probe whose failure can be repaired goes second, and a
 flush newline between the two does the repairing. An earlier version of this
 paragraph said the opposite; the code has always been right.
+
+The framed probe gets two goes before the newline one is risked, which is also
+measured rather than guessed. A heartwood that has just been unlocked is still
+finishing its boot, and a single 1.5 s probe times out against a device that is
+merely busy - at which point the line probe wedges it, and a board that needed
+one more second reports "no note locker answered on either framing". Repeating
+the safe probe costs a second; reaching the unsafe one early costs the session.
 
 Every command carries a `tag`, which both devices echo verbatim on whatever
 answers it. The wire has no request ids otherwise, so a reply that is never
