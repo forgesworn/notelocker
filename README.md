@@ -82,8 +82,8 @@ answers `bad_request`.
 notelocker ports                     list attached candidate devices
 notelocker info                      firmware version, note counts, storage
 notelocker list [--offset N] [--limit N]
-notelocker new [--label <text>] [--parents <id,id>]
-notelocker new-pair [--parents <id,id>]
+notelocker new [--host <host>] [--label <text>] [--parents <id,id>]
+notelocker new-pair [--host <host>] [--label <text>] [--parents <id,id>]
 notelocker confirm <id> --amount <msat> --host <host> [--sig <hex>]
 notelocker import --secret <64-hex> --host <host> --amount <msat> [--label <text>]
 notelocker export <id>               needs the button
@@ -92,8 +92,47 @@ notelocker discard <id>              needs the button
 notelocker rename <id> <label>       needs the button
 notelocker delete <id>               needs the button
 notelocker reset                     lnurl-vault only
+notelocker provision-cash --host <host> --node <128-hex>   heartwood only, needs the button
+notelocker forget-cash --host <host>                       heartwood only
+notelocker list-cash                                       heartwood only
+notelocker set-cash-index --host <host> --index <n>        heartwood only
 notelocker raw '<json>'              send one raw protocol command
 ```
+
+### Seed-recoverable notes
+
+A note secret drawn at random is perfectly good money and completely
+unfindable from a seed phrase, which is a poor thing to discover after a board
+dies. [LUD-25][lud25] specifies deriving them instead, under
+`m/139'/d1/d2/d3/d4/i'` where `d1..d4` come from hashing the mint's host.
+
+`m/139'` hangs off the BIP-32 master, and a heartwood does not keep one - it
+stores a tree root from a different branch and the phrase only ever exists on
+the owner's screen. So the wallet that holds the seed derives the per-mint
+**domain node** and provisions it:
+
+```
+notelocker provision-cash --host mint.example --node <64 bytes of hex>
+notelocker new --host mint.example        # derived, and findable from the seed
+notelocker new                            # random, as before
+```
+
+Every unhardened level of the path sits at or above that node, so beneath it
+the device only walks `i'`. That is why provisioning works at all on hardware
+with no elliptic curve - it is the same answer `lnurl-vault` reached.
+
+**Provisioning needs the button, and should.** Whoever supplies a node can
+derive every note secret that device will ever hold at that mint. One mint's
+subtree, not the wallet - but the card names the host precisely so the owner
+can check they meant that mint, because nobody can check 64 bytes of hex by
+eye.
+
+`list-cash` shows the mints and each one's next index, never the nodes.
+`set-cash-index` raises the index to meet a wallet that has minted further;
+it cannot lower it, because an index handed out twice is two notes answering
+to one `k1`.
+
+[lud25]: https://github.com/lnurl/luds/pull/301
 
 Options: `--port <path>`, `--transport auto|frame|line`, `--timeout <ms>`,
 `--json`, `--help`.

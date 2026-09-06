@@ -14,6 +14,14 @@ export type CommandSpec = {
   readonly gated: boolean
   /** Present on an lnurl-vault but not on a heartwood. */
   readonly vaultOnly?: boolean
+  /**
+   * Present on a heartwood but not on an lnurl-vault: LUD-25 seed-recoverable
+   * note secrets, which the vault has the arithmetic for (`derive.c`, from
+   * `dni/lnurl-vault#134`) but has not wired to a command. If it grows one,
+   * expect this to become shared rather than a second spelling - the point of
+   * this tool is that one command set drives both.
+   */
+  readonly heartwoodOnly?: boolean
   readonly usage: string
   build(args: readonly string[], flags: Flags): Record<string, unknown>
 }
@@ -48,6 +56,24 @@ function requireHost(flags: Flags): string {
   const host = text(flags, 'host')
   if (host === undefined || host === '') throw new UsageError('--host is required, the mint this note is drawn on')
   return host
+}
+
+/// The 64 bytes a mint's LUD-25 subtree is: a 32-byte key then a 32-byte
+/// chain code, hex. Checked here rather than left to the device, because the
+/// device answers a malformed one with a bare `bad_request` and the operator
+/// is standing at a cable wondering which of two arguments was wrong.
+function requireNode(flags: Flags): string {
+  const node = text(flags, 'node')
+  if (node === undefined || node === '') {
+    throw new UsageError("--node is required: the mint's domain node, 64 bytes of hex")
+  }
+  const cleaned = node.trim().toLowerCase()
+  if (!/^[0-9a-f]{128}$/.test(cleaned)) {
+    throw new UsageError(
+      `--node must be 64 bytes of hex (128 characters), got ${cleaned.length}`
+    )
+  }
+  return cleaned
 }
 
 function parents(flags: Flags): string[] | undefined {
@@ -89,11 +115,18 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     cmd: 'new_secret',
     summary: 'generate a new note secret on the device',
     gated: false,
-    usage: 'notelocker new [--label <text>] [--parents <id,id>]',
+    usage: 'notelocker new [--host <host>] [--label <text>] [--parents <id,id>]',
     build: (_args, flags) => {
       const command: Record<string, unknown> = {cmd: 'new_secret'}
       const label = optionalLabel(flags)
       const parentIds = parents(flags)
+      // With --host the secret comes off that mint's LUD-25 ladder, so a seed
+      // phrase can find the note again; without it the device draws at random
+      // exactly as it always has. Passed through rather than defaulted: a
+      // host the device has no subtree for is refused, and that refusal is
+      // the honest answer to "give me a note my seed can find".
+      const host = text(flags, 'host')
+      if (host !== undefined) command['host'] = host
       if (label !== undefined) command['label'] = label
       if (parentIds !== undefined) command['parent_ids'] = parentIds
       return command
@@ -103,10 +136,15 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     cmd: 'new_secret_pair',
     summary: 'generate two secrets at once, for a split',
     gated: false,
-    usage: 'notelocker new-pair [--parents <id,id>]',
+    usage: 'notelocker new-pair [--host <host>] [--label <text>] [--parents <id,id>]',
     build: (_args, flags) => {
       const command: Record<string, unknown> = {cmd: 'new_secret_pair'}
       const parentIds = parents(flags)
+      // Both secrets come off the ladder under one counter write. See `new`.
+      const host = text(flags, 'host')
+      const label = optionalLabel(flags)
+      if (host !== undefined) command['host'] = host
+      if (label !== undefined) command['label'] = label
       if (parentIds !== undefined) command['parent_ids'] = parentIds
       return command
     }
@@ -126,6 +164,57 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
       const sig = text(flags, 'sig')
       if (sig !== undefined) command['sig'] = sig
       return command
+    }
+  },
+  'provision-cash': {
+    cmd: 'provision_cash_node',
+    heartwoodOnly: true,
+    // What the operator is really being asked on the device is "is this the
+    // mint you meant", because the node cannot be checked by eye. Say so here
+    // too, so the card is not the first place they learn it matters.
+    summary: "store a mint's LUD-25 subtree so its notes derive from the seed (needs the button)",
+    gated: true,
+    usage: 'notelocker provision-cash --host <host> --node <128-hex>',
+    build: (_args, flags) => ({
+      cmd: 'provision_cash_node',
+      host: requireHost(flags),
+      node: requireNode(flags)
+    })
+  },
+  'forget-cash': {
+    cmd: 'forget_cash_node',
+    heartwoodOnly: true,
+    summary: "drop a mint's subtree; notes already held are untouched",
+    gated: false,
+    usage: 'notelocker forget-cash --host <host>',
+    build: (_args, flags) => ({cmd: 'forget_cash_node', host: requireHost(flags)})
+  },
+  'list-cash': {
+    cmd: 'list_cash_mints',
+    heartwoodOnly: true,
+    summary: 'mints this device can derive notes for, and the next index of each',
+    gated: false,
+    usage: 'notelocker list-cash',
+    build: () => ({cmd: 'list_cash_mints'})
+  },
+  'set-cash-index': {
+    cmd: 'set_cash_index',
+    heartwoodOnly: true,
+    // Raises only, and the device enforces that. Named "set" to match the
+    // wire, described as "raise" because that is what it can actually do.
+    summary: "raise a mint's next index to meet a wallet that has minted further",
+    gated: false,
+    usage: 'notelocker set-cash-index --host <host> --index <n>',
+    build: (_args, flags) => {
+      const raw = text(flags, 'index')
+      if (raw === undefined) throw new UsageError('--index is required, the next index to mint at')
+      if (!/^\d+$/.test(raw)) throw new UsageError(`--index must be a whole number, got ${raw}`)
+      const index = Number(raw)
+      // 2^31 is where the device stops: `i` is hardened by LUD-25's own `i'`,
+      // so it has the low 31 bits. Refused here so the operator gets the
+      // reason rather than a bare bad_request.
+      if (index > 0x7fffffff) throw new UsageError('--index must be below 2147483648')
+      return {cmd: 'set_cash_index', host: requireHost(flags), next_index: index}
     }
   },
   discard: {
