@@ -1,0 +1,52 @@
+{
+  "name": "@forgesworn/notelocker",
+  "version": "0.1.0",
+  "description": "A CLI for LNURLcash bearer-note locker devices. Speaks lnurl-vault's serial command set over either framing, so one tool drives an lnurl-vault and a heartwood alike.",
+  "author": "TheCryptoDonkey",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/forgesworn/notelocker.git"
+  },
+  "homepage": "https://github.com/forgesworn/notelocker#readme",
+  "bugs": {
+    "url": "https://github.com/forgesworn/notelocker/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "notelocker": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test && npm run build && npm pack --dry-run"
+  },
+  "dependencies": {
+    "serialport": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
