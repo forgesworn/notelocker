@@ -1,0 +1,84 @@
+# notelocker
+
+> Driving an LNURLcash bearer-note locker over USB means picking apart two
+> different framings and two different device families by hand. notelocker is
+> a CLI and library that speaks lnurl-vault's serial command set over either
+> framing, so one tool drives an lnurl-vault and a heartwood alike.
+
+For anyone scripting or operating a note locker device: minting notes,
+listing and spending them, or provisioning LUD-25 seed-recoverable notes.
+`--transport auto` works out whether the attached device is framed
+(heartwood) or newline-delimited JSON (lnurl-vault) and drives either the
+same way, so scripts do not need to know which board is on the end of the
+cable.
+
+## Getting Started
+
+```
+npx @forgesworn/notelocker info
+```
+
+Or install it globally with `npm i -g @forgesworn/notelocker`. It depends on
+`serialport`, a native module with prebuilt binaries for current Node on
+macOS, Linux and Windows.
+
+```
+$ notelocker ports
+/dev/cu.usbmodem2101  Espressif (native USB)
+
+$ notelocker list
+a1b2c3d4  CONFIRMED  50.000 sat  float      moneyer.dev
+```
+
+As a library:
+
+```ts
+import {detectTransport, openPort, lookup, timeoutFor} from '@forgesworn/notelocker'
+
+const wire = await openPort('/dev/cu.usbmodem2101')
+const transport = await detectTransport(wire)
+const spec = lookup('list')
+const reply = await transport.request(spec.build([], {}), timeoutFor(spec))
+await wire.close()
+```
+
+## Key Concepts
+
+- **Transport**: the framing over the wire. `frameTransport` is a heartwood
+  (`HW` magic, type, length, payload, CRC32); `lineTransport` is an
+  lnurl-vault (one JSON object per line). `detectTransport` probes for
+  whichever is attached.
+- **CommandSpec**: one entry in `COMMANDS`, describing a protocol command:
+  its `cmd` name, whether it is `gated` (needs a physical button press) and
+  whether it is `vaultOnly` or `heartwoodOnly`.
+- **Gated commands**: commands that put a card on the device's display and
+  wait for a physical confirmation, up to 30 seconds. They use
+  `GATED_TIMEOUT_MS`; other commands use `DEFAULT_TIMEOUT_MS`.
+- **Seed-recoverable notes**: LUD-25 notes derived from a per-mint domain
+  node instead of drawn at random, so they survive a board loss if the
+  owner still has the seed. Provisioned with `notelocker provision-cash`.
+
+## API Surface
+
+Library exports from `@forgesworn/notelocker`:
+
+- `openPort`, `listPorts`, `candidates`, `choosePort`: find and open a
+  device's serial port.
+- `detectTransport`, `frameTransport`, `lineTransport`: build a `Transport`
+  for a given `Wire`.
+- `lookup`, `timeoutFor`, `COMMANDS`: look up a `CommandSpec` by name and
+  pick its timeout.
+- `FrameDecoder`, `encodeFrame`, `crc32`: the frame codec, pure and
+  dependency-free.
+- Errors: `TimeoutError`, `DeviceRefusedError`, `TransportError`, `PortError`,
+  `UsageError`, `FrameError`.
+
+CLI commands: `ports`, `info`, `list`, `new`, `new-pair`, `confirm`, `import`,
+`export`, `spend`, `discard`, `rename`, `delete`, `reset` (lnurl-vault only),
+`provision-cash`, `forget-cash`, `list-cash`, `set-cash-index` (heartwood
+only), `raw`. Run `notelocker --help` for the full usage.
+
+## Optional
+
+- Full command reference and protocol notes: [README](README.md)
+- Wire protocol specification: [lnurl-vault's docs/PROTOCOL.md](https://github.com/dni/lnurl-vault/blob/main/docs/PROTOCOL.md)

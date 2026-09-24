@@ -32,7 +32,8 @@
   "files": [
     "dist",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "llms.txt"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
