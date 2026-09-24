@@ -9,6 +9,23 @@
     "url": "git+https://github.com/forgesworn/notelocker.git"
   },
   "homepage": "https://github.com/forgesworn/notelocker#readme",
+  "keywords": [
+    "lnurlcash",
+    "bearer-note",
+    "note-locker",
+    "lnurl-vault",
+    "heartwood",
+    "lightning",
+    "bitcoin",
+    "cli",
+    "serial",
+    "usb",
+    "esp32",
+    "lud25",
+    "seed-recoverable",
+    "cash",
+    "hardware"
+  ],
   "bugs": {
     "url": "https://github.com/forgesworn/notelocker/issues"
   },
